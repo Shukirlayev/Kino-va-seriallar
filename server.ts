@@ -7,7 +7,7 @@ import { createServer as createViteServer } from "vite";
 import apiRouter from "./server/api";
 import { setupBot } from "./server/bot";
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   const app = express();

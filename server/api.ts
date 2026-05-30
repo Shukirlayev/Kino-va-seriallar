@@ -11,12 +11,12 @@ router.get("/content", tgAuthMiddleware, async (req, res) => {
     const movies = await prisma.movie.findMany({
       include: { languages: true },
       orderBy: { createdAt: "desc" }
-    });
+    }) || [];
 
     const series = await prisma.series.findMany({
       include: { seasons: { include: { episodes: { include: { languages: true } } } } },
       orderBy: { createdAt: "desc" }
-    });
+    }) || [];
 
     res.json({ movies, series, error: false });
   } catch (error) {

@@ -5,6 +5,7 @@ let bot: Telegraf | null = null;
 const adminStates = new Map<number, any>();
 
 const clearState = (id: number) => adminStates.delete(id);
+const cancelBtn = Markup.inlineKeyboard([Markup.button.callback("❌ Bekor qilish", "cancel_admin")]);
 
 export function setupBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -46,53 +47,88 @@ export function setupBot() {
     );
   });
 
-  // Admin Asosiy Menyu
   bot.command("admin", (ctx) => {
     clearState(ctx.from.id);
-    if (!isAdmin(ctx)) return ctx.reply("Sizda admin huquqlari yo'q.");
+    if (!isAdmin(ctx)) return ctx.reply("⛔️ Sizda admin huquqlari yo'q.");
 
-    ctx.reply("👨‍💻 Admin Panel\n\nQuyidagi amallardan birini tanlang:", Markup.inlineKeyboard([
+    ctx.reply("👨‍💻 Admin Panel\n\n👇 Platformani boshqarish uchun quyidagi menyulardan foydalaning:", Markup.inlineKeyboard([
       [Markup.button.callback("🎬 Film qo'shish", "add_movie"), Markup.button.callback("📺 Serial qo'shish", "add_series")],
       [Markup.button.callback("📼 Qism qo'shish (Serial uchun)", "add_episode")],
-      [Markup.button.callback("❌ Amalni bekor qilish", "cancel_admin")],
-      [Markup.button.callback("📊 Statistika ko'rish", "admin_stats")]
+      [Markup.button.callback("🗑 Filmlarni uchirish", "del_movies"), Markup.button.callback("🗑 Serialni uchirish", "del_series")],
+      [Markup.button.callback("📊 Platforma Statistikasi", "admin_stats")]
     ]));
   });
 
   bot.action("cancel_admin", (ctx) => {
     clearState(ctx.from?.id || 0);
-    ctx.reply("Harakat bekor qilindi. /admin orqali panelni qayta ochishingiz mumkin.");
+    ctx.editMessageText("❌ Amal bekor qilindi. Bosh menyu uchun /admin ni bosing.", Markup.inlineKeyboard([]));
+    ctx.answerCbQuery();
   });
 
   bot.action("add_movie", (ctx) => {
     if (!isAdmin(ctx)) return;
     adminStates.set(ctx.from.id, { flow: "add_movie", step: 1, data: {} });
-    ctx.reply("🎬 Yangi film qo'shamiz.\n\n1. Film nomini yozing (Masalan: Qasoskorlar):");
+    ctx.editMessageText("🎬 Yangi film qo'shamiz.\n\n1️⃣ Film nomini yozing (Masalan: Qasoskorlar):", cancelBtn);
   });
 
   bot.action("add_series", (ctx) => {
     if (!isAdmin(ctx)) return;
     adminStates.set(ctx.from.id, { flow: "add_series", step: 1, data: {} });
-    ctx.reply("📺 Yangi serial qo'shamiz.\n\n1. Serial nomini yozing (Masalan: Qora ritsarlar):");
+    ctx.editMessageText("📺 Yangi serial qo'shamiz.\n\n1️⃣ Serial nomini yozing (Masalan: Qora ritsarlar):", cancelBtn);
   });
 
   bot.action("add_episode", async (ctx) => {
     if (!isAdmin(ctx)) return;
     try {
-        const seriesList = await prisma.series.findMany({ select: { id: true, title: true }});
-        if (!seriesList.length) return ctx.reply("Hozircha bazada hech qanday serial yo'q. Oldin serial qo'shing.");
+        const seriesList = await prisma.series.findMany({ select: { id: true, title: true }, orderBy: { createdAt: "desc" }, take: 10 });
+        if (!seriesList || !seriesList.length) return ctx.reply("Hozircha bazada serial yo'q.");
         
-        // Ro'yxatni ko'rsatish
-        let text = "📼 Qism qo'shish uchun quyidagi seriallardan birining ID raqamini pastga yozing:\n\n";
-        seriesList.forEach(s => {
-          text += `ID: ${s.id} | ${s.title}\n`;
-        });
+        let text = "📼 Qism qo'shish uchun serial ID raqamini raqamda yozing:\n\n";
+        seriesList.forEach(s => { text += `🔹 ID: ${s.id} | ${s.title}\n`; });
         
         adminStates.set(ctx.from.id, { flow: "add_episode", step: 1, data: {} });
-        ctx.reply(text);
+        ctx.editMessageText(text, cancelBtn);
     } catch(e) {
-        ctx.reply("Baza bilan xatolik yuz berdi.");
+        ctx.reply("Xatolik: Baza ulanmagan yoki xato.");
     }
+  });
+
+  bot.action("del_movies", async (ctx) => {
+     if (!isAdmin(ctx)) return;
+     try {
+         const movies = await prisma.movie.findMany({ orderBy: { createdAt: "desc" }, take: 20 });
+         if (!movies.length) return ctx.reply("Filmlar topilmadi.");
+         
+         const buttons = movies.map(m => [Markup.button.callback(`🗑 ${m.title}`, `dx_mov_${m.id}`)]);
+         buttons.push([Markup.button.callback("⬅️ Orqaga", "cancel_admin")]);
+         
+         ctx.editMessageText("O'chirmoqchi bo'lgan filmni tanlang (Oxirgi 20 ta):", Markup.inlineKeyboard(buttons));
+     } catch(e) {}
+  });
+
+  bot.action("del_series", async (ctx) => {
+     if (!isAdmin(ctx)) return;
+     try {
+         const series = await prisma.series.findMany({ orderBy: { createdAt: "desc" }, take: 20 });
+         if (!series.length) return ctx.reply("Seriallar topilmadi.");
+         
+         const buttons = series.map(s => [Markup.button.callback(`🗑 ${s.title}`, `dx_ser_${s.id}`)]);
+         buttons.push([Markup.button.callback("⬅️ Orqaga", "cancel_admin")]);
+         
+         ctx.editMessageText("O'chirmoqchi bo'lgan serialni tanlang:", Markup.inlineKeyboard(buttons));
+     } catch(e) {}
+  });
+
+  bot.action(/^dx_mov_(\d+)$/, async (ctx) => {
+      if (!isAdmin(ctx)) return;
+      const id = Number(ctx.match[1]);
+      try { await prisma.movie.delete({ where: { id } }); ctx.answerCbQuery("Film o'chirildi ✅"); ctx.editMessageText("Film muvaffaqiyatli o'chirildi."); } catch(e) { ctx.reply("O'chirishda xatolik."); }
+  });
+
+  bot.action(/^dx_ser_(\d+)$/, async (ctx) => {
+      if (!isAdmin(ctx)) return;
+      const id = Number(ctx.match[1]);
+      try { await prisma.series.delete({ where: { id } }); ctx.answerCbQuery("Serial o'chirildi ✅"); ctx.editMessageText("Serial muvaffaqiyatli o'chirildi."); } catch(e) { ctx.reply("O'chirishda xatolik."); }
   });
 
   bot.action("admin_stats", async (ctx) => {
@@ -102,108 +138,94 @@ export function setupBot() {
       const m = await prisma.movie.count();
       const s = await prisma.series.count();
       const e = await prisma.episode.count();
-      ctx.reply(`📊 Platforma Statistikasi:\n\n👥 Foydalanuvchilar: ${u} ta\n🎬 Filmlar: ${m} ta\n📺 Seriallar: ${s} ta\n📼 Jami qismlar: ${e} ta`);
+      ctx.editMessageText(`📊 Platforma Statistikasi:\n\n👥 Foydalanuvchilar: ${u} ta\n🎬 Filmlar: ${m} ta\n📺 Seriallar: ${s} ta\n📼 Jami qismlar: ${e} ta`, cancelBtn);
     } catch(e) {
-      ctx.reply("Xatolik yuz berdi.");
+      ctx.reply("Ma'lumot topilmadi.");
     }
   });
 
-  // Matnli javoblarni ushlab olish (State orqali)
   bot.on("text", async (ctx, next) => {
     const state = adminStates.get(ctx.from.id);
     if (!state || !isAdmin(ctx)) return next();
     const text = ctx.message.text;
 
     try {
-        // --- ADD MOVIE ---
         if (state.flow === "add_movie") {
             if (state.step === 1) {
                 state.data.title = text;
                 state.step = 2;
-                return ctx.reply("2. Film tavsifini (Opisaniye) yozing:");
+                return ctx.reply("2️⃣ Film tavsifini (Opisaniye) yozing:", cancelBtn);
             }
             if (state.step === 2) {
                 state.data.description = text;
                 state.step = 3;
-                return ctx.reply("3. Film posteri xavolasi (Rasmning URL manzilini) yuboring. \nMasalan: https://site.com/rasm.jpg");
+                return ctx.reply("3️⃣ Film posteri (Rasmning http ligi) yuboring:", cancelBtn);
             }
             if (state.step === 3) {
                 state.data.poster = text;
                 state.step = 4;
-                return ctx.reply("4. Film tilini yozing (Masalan: O'zbek):");
+                return ctx.reply("4️⃣ Film tilini yozing (Masalan: O'zbek):", cancelBtn);
             }
             if (state.step === 4) {
                 state.data.language = text;
                 state.step = 5;
-                return ctx.reply("5. Va nihoyat, filmning Video faylini shu chatga yuklang (Maks. 2GB):");
+                return ctx.reply("5️⃣ Va nihoyat, filmning VIDEO faylini menga yuboring (Yoki forward qiling).", cancelBtn);
             }
         }
         
-        // --- ADD SERIES ---
         if (state.flow === "add_series") {
             if (state.step === 1) {
                 state.data.title = text;
                 state.step = 2;
-                return ctx.reply("2. Serial tavsifini yozing:");
+                return ctx.reply("2️⃣ Serial tavsifini yozing:", cancelBtn);
             }
             if (state.step === 2) {
                 state.data.description = text;
                 state.step = 3;
-                return ctx.reply("3. Serial posteri xavolasini (Rasm URL manzilini) yuboring:");
+                return ctx.reply("3️⃣ Serial posteri (Rasm URL manzilini) yuboring:", cancelBtn);
             }
             if (state.step === 3) {
                 state.data.poster = text;
-                
-                // Saqlash
-                await prisma.series.create({
-                    data: {
-                        title: state.data.title,
-                        description: state.data.description,
-                        poster: state.data.poster
-                    }
-                });
+                await prisma.series.create({ data: { title: state.data.title, description: state.data.description, poster: state.data.poster } });
                 clearState(ctx.from.id);
-                return ctx.reply("✅ Serial muvaffaqiyatli saqlandi! Endi \"Qism qo'shish\" orqali epizodlarni qo'shishingiz mumkin.");
+                return ctx.reply("✅ Serial saqlandi! Endi \"Qism qo'shish\" menyusidan foydalanib videolarni yuklang.");
             }
         }
 
-        // --- ADD EPISODE ---
         if (state.flow === "add_episode") {
             if (state.step === 1) {
                 const seriesId = parseInt(text);
-                if (isNaN(seriesId)) return ctx.reply("Iltimos, faqat ID raqam kiriting:");
+                if (isNaN(seriesId)) return ctx.reply("Faqat ID raqam kiriting:", cancelBtn);
                 state.data.seriesId = seriesId;
                 state.step = 2;
-                return ctx.reply("2. Nechanchi fasl ekanligini yozing (Masalan: 1):");
+                return ctx.reply("2️⃣ Nechanchi fasl (Sezon) ekanligini yozing (Masalan: 1):", cancelBtn);
             }
             if (state.step === 2) {
                 const seasonNum = parseInt(text);
-                if (isNaN(seasonNum)) return ctx.reply("Faqat raqam kiriting:");
+                if (isNaN(seasonNum)) return ctx.reply("Faqat raqam kiriting:", cancelBtn);
                 state.data.seasonNum = seasonNum;
                 state.step = 3;
-                return ctx.reply("3. Nechanchi qism ekanligini yozing (Masalan: 5):");
+                return ctx.reply("3️⃣ Nechanchi qism (Seriya) ekanligini yozing (Masalan: 5):", cancelBtn);
             }
             if (state.step === 3) {
                 const epNum = parseInt(text);
-                if (isNaN(epNum)) return ctx.reply("Faqat raqam kiriting:");
+                if (isNaN(epNum)) return ctx.reply("Faqat raqam:", cancelBtn);
                 state.data.episodeNum = epNum;
                 state.step = 4;
-                return ctx.reply("4. Qism tilini kiriting (Masalan: O'zbek):");
+                return ctx.reply("4️⃣ Qism tilini yozing (Masalan: O'zbek):", cancelBtn);
             }
             if (state.step === 4) {
                 state.data.language = text;
                 state.step = 5;
-                return ctx.reply("5. Qismning video faylini shu yerga yuboring:");
+                return ctx.reply("5️⃣ Qismning Video faylini shu chatga yuboring:", cancelBtn);
             }
         }
     } catch(e) {
-        console.error(e);
-        ctx.reply("❌ Xatolik yuz berdi. Iltimos bekor qilib boshqatdan urinib ko'ring.");
+        ctx.reply("❌ Xatolik yuz berdi DB ulanishida. /admin ni bosing.");
         clearState(ctx.from.id);
     }
   });
 
-  // Video faylni ushlash
   bot.on("video", async (ctx, next) => {
       const state = adminStates.get(ctx.from.id);
       if (!state || !isAdmin(ctx)) return next();
@@ -212,66 +234,40 @@ export function setupBot() {
           const fileId = ctx.message.video.file_id;
 
           if (state.flow === "add_movie" && state.step === 5) {
-             ctx.reply("⏳ Yuklanmoqda... Bazaga saqlanmoqda...");
+             const m = await ctx.reply("⏳ Yuklanmoqda... Bazaga saqlanmoqda...");
              await prisma.movie.create({
                  data: {
                      title: state.data.title,
                      description: state.data.description,
                      poster: state.data.poster,
-                     languages: {
-                         create: [
-                             { language: state.data.language, fileId: fileId }
-                         ]
-                     }
+                     languages: { create: [ { language: state.data.language, fileId: fileId } ] }
                  }
              });
              clearState(ctx.from.id);
-             return ctx.reply("✅ Film muvaffaqiyatli saqlandi! /admin ni bosib davom ettirishingiz mumkin.");
+             return ctx.telegram.editMessageText(m.chat.id, m.message_id, undefined, "✅ Film muvaffaqiyatli saqlandi! /admin ni bosib davom ettirishingiz mumkin.");
           }
 
           if (state.flow === "add_episode" && state.step === 5) {
-             ctx.reply("⏳ Yuklanmoqda... Qism saqlanmoqda...");
+             const m = await ctx.reply("⏳ Yuklanmoqda... Qism saqlanmoqda...");
              
-             // Faslni tekshirish
-             let season = await prisma.season.findFirst({
-                 where: { seriesId: state.data.seriesId, seasonNum: state.data.seasonNum }
-             });
-             if (!season) {
-                 season = await prisma.season.create({
-                     data: { seriesId: state.data.seriesId, seasonNum: state.data.seasonNum }
-                 });
-             }
+             let season = await prisma.season.findFirst({ where: { seriesId: state.data.seriesId, seasonNum: state.data.seasonNum } });
+             if (!season) season = await prisma.season.create({ data: { seriesId: state.data.seriesId, seasonNum: state.data.seasonNum } });
              
-             // Qismni tekshirish
-             let episode = await prisma.episode.findFirst({
-                 where: { seasonId: season.id, episodeNum: state.data.episodeNum }
-             });
-             if (!episode) {
-                 episode = await prisma.episode.create({
-                     data: { seasonId: season.id, episodeNum: state.data.episodeNum }
-                 });
-             }
+             let episode = await prisma.episode.findFirst({ where: { seasonId: season.id, episodeNum: state.data.episodeNum } });
+             if (!episode) episode = await prisma.episode.create({ data: { seasonId: season.id, episodeNum: state.data.episodeNum } });
 
-             // Tilni va faylni qo'shish
-             await prisma.episodeLanguage.create({
-                 data: {
-                     episodeId: episode.id,
-                     language: state.data.language,
-                     fileId: fileId
-                 }
-             });
+             await prisma.episodeLanguage.create({ data: { episodeId: episode.id, language: state.data.language, fileId: fileId } });
 
              clearState(ctx.from.id);
-             return ctx.reply("✅ Qism muvaffaqiyatli saqlandi! /admin ni bosib davom eting.");
+             return ctx.telegram.editMessageText(m.chat.id, m.message_id, undefined, "✅ Qism muvaffaqiyatli saqlandi! /admin ni bosib davom eting.");
           }
       } catch(e) {
-          console.error(e);
           ctx.reply("❌ Xatolik yuz berdi saqlash davomida.");
           clearState(ctx.from.id);
       }
   });
 
-  bot.launch().then(() => console.log("🤖 Telegram Bot To'liq Ishga Tushdi."));
+  bot.launch().then(() => console.log("🤖 Telegram Bot To'liq Ishga Tushdi. (Yangi UI)"));
   process.once('SIGINT', () => bot?.stop('SIGINT'));
   process.once('SIGTERM', () => bot?.stop('SIGTERM'));
 }

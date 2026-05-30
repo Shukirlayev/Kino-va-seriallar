@@ -1,7 +1,17 @@
 import { PrismaClient } from "@prisma/client";
 
-// Ensure safe instantiation even if DATABASE_URL is missing in preview.
-// Queries will fail properly when invoked, but the app won't crash on boot.
-const prisma = new PrismaClient();
+let prisma: PrismaClient;
+
+if (process.env.DATABASE_URL) {
+  prisma = new PrismaClient();
+} else {
+  console.warn("⚠️ DATABASE_URL topilmadi. Baza bilan ishlash vaqtincha to'xtatildi.");
+  // Fake proxy to prevent app from crashing on boot if DB is missing
+  prisma = new Proxy({} as any, {
+    get: () => new Proxy({}, {
+      get: () => async () => null
+    })
+  });
+}
 
 export default prisma;
