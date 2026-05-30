@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int        @id @default(autoincrement())
+  telegramId BigInt     @unique
+  username   String?
+  firstName  String?
+  lastName   String?
+  isAdmin    Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+  viewStats  ViewStat[]
+}
+
+model Movie {
+  id          Int             @id @default(autoincrement())
+  title       String
+  description String
+  poster      String
+  languages   MovieLanguage[]
+  createdAt   DateTime        @default(now())
+  viewStats   ViewStat[]
+}
+
+model MovieLanguage {
+  id       Int    @id @default(autoincrement())
+  movieId  Int
+  movie    Movie  @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  language String
+  fileId   String
+}
+
+model Series {
+  id          Int        @id @default(autoincrement())
+  title       String
+  description String
+  poster      String
+  seasons     Season[]
+  createdAt   DateTime   @default(now())
+  viewStats   ViewStat[]
+}
+
+model Season {
+  id        Int       @id @default(autoincrement())
+  seriesId  Int
+  series    Series    @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seasonNum Int
+  episodes  Episode[]
+}
+
+model Episode {
+  id         Int               @id @default(autoincrement())
+  seasonId   Int
+  season     Season            @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  episodeNum Int
+  languages  EpisodeLanguage[]
+}
+
+model EpisodeLanguage {
+  id        Int     @id @default(autoincrement())
+  episodeId Int
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  language  String
+  fileId    String
+}
+
+model ViewStat {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  movieId   Int?
+  movie     Movie?   @relation(fields: [movieId], references: [id])
+  seriesId  Int?
+  series    Series?  @relation(fields: [seriesId], references: [id])
+  createdAt DateTime @default(now())
+}
